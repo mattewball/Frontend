@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Змейка</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <h1>Змейка</h1>
+
+    <div class="controls">
+      <label
+        >Ширина:
+        <input type="number" id="width_input" value="20" min="5" max="50"
+      /></label>
+      <label
+        >Высота:
+        <input type="number" id="height_input" value="15" min="5" max="15"
+      /></label>
+      <button id="apply-btn">Обновить карту</button>
+    </div>
+
+    <div class="user-panel">
+      <label
+        >Имя игрока:
+        <input
+          type="text"
+          id="player-name"
+          value="Игрок 1"
+          placeholder="Введите имя..."
+      /></label>
+    </div>
+
+    <div class="score-board">
+      <span>Счет: <strong id="current-score">0</strong></span>
+      <span>Рекорд: <strong id="best-score">0</strong></span>
+    </div>
+
+    <div class="game-wrapper">
+      <canvas id="game"></canvas>
+      <div id="game-overlay" class="overlay hidden">
+        <div id="overlay-text-main"></div>
+        <div id="overlay-text-sub" class="sub-text"></div>
+      </div>
+    </div>
+
+    <div class="logs-container">
+      <h3>История последних достижений:</h3>
+      <ul id="log-list"></ul>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
