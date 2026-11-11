@@ -2,18 +2,50 @@ import { z } from "zod";
 import confetti from "canvas-confetti";
 import { SnakeGame } from "./GameEngine.js";
 
-const GameStateSchema = z.object({
-  width: z.number().min(5).max(60),
-  height: z.number().min(5).max(60),
-  snake: z.array(z.object({ x: z.number(), y: z.number() })),
-  food: z.object({ x: z.number(), y: z.number() }),
-  score: z.number().nonnegative(),
-  direction: z.object({ x: z.number(), y: z.number() }),
-  nextDirection: z.object({ x: z.number(), y: z.number() }),
-  isStarted: z.boolean(),
-  isGameOver: z.boolean(),
-  isVictory: z.boolean()
+const CoordinateSchema = z.object({
+  x: z.number().int().nonnegative(),
+  y: z.number().int().nonnegative()
 });
+
+const DirectionSchema = z.object({
+  x: z.number().int().min(-1).max(1),
+  y: z.number().int().min(-1).max(1)
+});
+
+const GameStateSchema = z
+  .object({
+    width: z.number().int().min(5).max(60),
+    height: z.number().int().min(5).max(60),
+
+    snake: z.array(CoordinateSchema).min(1, "Змейка не может быть пустой"),
+
+    food: CoordinateSchema,
+    score: z.number().int().nonnegative(),
+    direction: DirectionSchema,
+    nextDirection: DirectionSchema,
+    isStarted: z.boolean(),
+    isGameOver: z.boolean(),
+    isVictory: z.boolean()
+  })
+  .superRefine((data, ctx) => {
+    data.snake.forEach((cell, index) => {
+      if (cell.x >= data.width || cell.y >= data.height) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Сегмент змейки на позиции ${index} вышел за границы поля`,
+          path: ["snake", index]
+        });
+      }
+    });
+
+    if (data.food.x >= data.width || data.food.y >= data.height) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Еда находится за пределами поля",
+        path: ["food"]
+      });
+    }
+  });
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
@@ -35,7 +67,25 @@ const SNAKE_STEP_TIME = 130;
 let animationFrameId = null;
 
 let highScore = parseInt(localStorage.getItem("snake_high_score") || "0", 10);
-let logs = JSON.parse(localStorage.getItem("snake_game_logs") || "[]");
+if (isNaN(highScore)) {
+  highScore = 0;
+}
+
+let logs = [];
+try {
+  const savedLogs = localStorage.getItem("snake_game_logs");
+  if (savedLogs) {
+    const parsed = JSON.parse(savedLogs);
+    if (Array.isArray(parsed)) {
+      logs = parsed;
+    }
+  }
+} catch (error) {
+  console.warn("Битые данные логов в localStorage. Сбрасываем логи.", error);
+  localStorage.removeItem("snake_game_logs");
+}
+
+let logsDirty = false;
 
 function saveGame() {
   localStorage.setItem("snake_saved_state", JSON.stringify(game.getState()));
@@ -63,26 +113,29 @@ function loadGameSafe() {
   }
 }
 
-function updateLogList(message) {
-  if (message) {
-    logs.unshift({ id: Date.now().toString(), text: message });
-    if (logs.length > 5) logs.pop();
-    localStorage.setItem("snake_game_logs", JSON.stringify(logs));
-  }
+function addLog(message) {
+  if (!message) return;
+  logs.unshift({ id: Date.now().toString(), text: message });
+  if (logs.length > 5) logs.pop();
+  localStorage.setItem("snake_game_logs", JSON.stringify(logs));
+  logsDirty = true;
+}
 
+function renderLogs() {
   logList.innerHTML = "";
   logs.forEach(item => {
     const li = document.createElement("li");
     li.textContent = item.text;
     logList.appendChild(li);
   });
+  logsDirty = false;
 }
 
 function initUI() {
   canvas.width = game.width * game.cellSize;
   canvas.height = game.height * game.cellSize;
   bestScoreEl.textContent = highScore;
-  updateLogList();
+  renderLogs();
   resetLoop();
 }
 
@@ -107,18 +160,21 @@ function gameLoop(currentTime) {
   while (accumulator >= SNAKE_STEP_TIME) {
     game.step();
     accumulator -= SNAKE_STEP_TIME;
+    saveGame();
   }
 
   if (game.score > oldScore) {
-    updateLogList(
-      `🍏 ${playerNameInput.value} съел фрукт! Счет: ${game.score}`
-    );
+    addLog(`🍏 ${playerNameInput.value} съел фрукт! Счет: ${game.score}`);
     if (game.score > highScore) {
       highScore = game.score;
       bestScoreEl.textContent = highScore;
       localStorage.setItem("snake_high_score", highScore.toString());
     }
     saveGame();
+  }
+
+  if (logsDirty) {
+    renderLogs();
   }
 
   draw();
@@ -187,7 +243,7 @@ function updateOverlay() {
 
     if (!confettiTriggered) {
       confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
-      updateLogList(`🏆 ${playerNameInput.value} ПОБЕДИЛ В ИГРЕ!`);
+      addLog(`🏆 ${playerNameInput.value} ПОБЕДИЛ В ИГРЕ!`);
       confettiTriggered = true;
     }
   } else {
@@ -196,25 +252,31 @@ function updateOverlay() {
 }
 
 window.addEventListener("keydown", e => {
-  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
-    e.preventDefault();
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key))
+    return;
 
-    if (game.isGameOver) {
-      game.reset();
-      saveGame();
-      updateLogList(`🔄 Нарушена новая игра для ${playerNameInput.value}`);
-      resetLoop();
-      return;
-    }
+  e.preventDefault();
 
-    game.changeDirection(e.key);
+  if (game.isGameOver) {
+    game.reset();
     saveGame();
+    addLog(`🔄 Нарушена новая игра для ${playerNameInput.value}`);
+    resetLoop();
+    return;
   }
+
+  game.changeDirection(e.key);
+  saveGame();
 });
 
 applyBtn.addEventListener("click", () => {
-  const w = parseInt(widthInput.value, 10) || 20;
-  const h = parseInt(heightInput.value, 10) || 15;
+  let w = parseInt(widthInput.value, 10) || 20;
+  let h = parseInt(heightInput.value, 10) || 15;
+
+  w = Math.min(Math.max(w, 5), 60);
+  h = Math.min(Math.max(h, 5), 60);
+
   game.width = w;
   game.height = h;
   game.reset();
