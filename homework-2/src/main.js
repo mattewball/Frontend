@@ -9,8 +9,17 @@ const CoordinateSchema = z.object({
 
 const DirectionSchema = z.object({
   x: z.number().int().min(-1).max(1),
-  y: z.number().int().min(-1).max(1)
+  y: z.number().int().min(-1).max(1),
+}).refine((data) => Math.abs(data.x) + Math.abs(data.y) === 1, {
+  message: "Вектор направления должен быть ненулевым и указывать строго по одной оси (x или y)",
 });
+
+const LogItemSchema = z.object({
+  id: z.string(),
+  text: z.string()
+});
+
+const LogsArraySchema = z.array(LogItemSchema);
 
 const GameStateSchema = z
   .object({
@@ -77,7 +86,11 @@ try {
   if (savedLogs) {
     const parsed = JSON.parse(savedLogs);
     if (Array.isArray(parsed)) {
-      logs = parsed;
+      logs = parsed.filter(item => LogItemSchema.safeParse(item).success);
+
+      if (logs.length !== parsed.length) {
+         localStorage.setItem("snake_game_logs", JSON.stringify(logs));
+      }
     }
   }
 } catch (error) {
@@ -86,6 +99,7 @@ try {
 }
 
 let logsDirty = false;
+let needsMapUpdate = false;
 
 function saveGame() {
   localStorage.setItem("snake_saved_state", JSON.stringify(game.getState()));
@@ -154,6 +168,19 @@ function gameLoop(currentTime) {
 
   if (deltaTime > 100) deltaTime = 100;
   accumulator += deltaTime;
+
+  if (needsMapUpdate) {
+    canvas.width = game.width * game.cellSize;
+    canvas.height = game.height * game.cellSize;
+    
+    widthInput.value = game.width;
+    heightInput.value = game.height;
+
+    lastTime = performance.now();
+    accumulator = 0;
+    
+    needsMapUpdate = false;
+  }
 
   const oldScore = game.score;
 
@@ -281,7 +308,7 @@ applyBtn.addEventListener("click", () => {
   game.height = h;
   game.reset();
   saveGame();
-  initUI();
+  needsMapUpdate = true; 
 });
 
 playerNameInput.addEventListener("input", () => {
