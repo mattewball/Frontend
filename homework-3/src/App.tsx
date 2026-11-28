@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import confetti from "canvas-confetti";
-import { SnakeGame } from "./GameEngine";
+import { createInitialState, step, changeDirection } from "./GameEngine";
 import { GameStateSchema, LogsArraySchema } from "./schemas";
 import { LogItem, GameState } from "./types";
+import { safeGetItem, safeSetItem, safeRemoveItem } from "./storage";
 import { ScoreBoard } from "./components/ScoreBoard";
 import { Controls } from "./components/Controls";
 import { GameLogs } from "./components/GameLogs";
@@ -10,35 +11,34 @@ import { GameCanvas } from "./components/GameCanvas";
 import "./style.css";
 
 export default function App() {
-  const [engine] = useState(() => {
-    const game = new SnakeGame();
+  const [gameState, setGameState] = useState<GameState>(() => {
     try {
-      const savedGame = localStorage.getItem("snake_saved_state");
+      const savedGame = safeGetItem("snake_saved_state");
       if (savedGame) {
         const parsed = JSON.parse(savedGame);
         const validGame = GameStateSchema.safeParse(parsed);
-        if (validGame.success) {
-          game.loadState(validGame.data as GameState);
-        } else {
-          localStorage.removeItem("snake_saved_state");
-        }
+        if (validGame.success) return validGame.data as GameState;
+        else safeRemoveItem("snake_saved_state");
       }
     } catch (e) {
       console.error("Ошибка загрузки сохранения", e);
     }
-    return game;
+    return createInitialState(20, 15);
   });
 
-  const [gameState, setGameState] = useState<GameState>(() =>
-    engine.getState()
-  );
+  const gameStateRef = useRef(gameState);
+
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
   const [playerName, setPlayerName] = useState(
-    () => localStorage.getItem("snake_player_name") || ""
+    () => safeGetItem("snake_player_name") || ""
   );
 
   const [logs, setLogs] = useState<LogItem[]>(() => {
     try {
-      const savedLogs = localStorage.getItem("snake_game_logs");
+      const savedLogs = safeGetItem("snake_game_logs");
       if (savedLogs) {
         const parsed = JSON.parse(savedLogs);
         const validLogs = LogsArraySchema.safeParse(parsed);
@@ -51,12 +51,12 @@ export default function App() {
   });
 
   const [highScore, setHighScore] = useState(() => {
-    const hs = parseInt(localStorage.getItem("snake_high_score") || "0", 10);
+    const hs = parseInt(safeGetItem("snake_high_score") || "0", 10);
     return isNaN(hs) ? 0 : hs;
   });
 
-  const [inputWidth, setInputWidth] = useState(() => engine.width);
-  const [inputHeight, setInputHeight] = useState(() => engine.height);
+  const [inputWidth, setInputWidth] = useState(() => gameState.width);
+  const [inputHeight, setInputHeight] = useState(() => gameState.height);
 
   const playerNameRef = useRef(playerName);
   const highScoreRef = useRef(highScore);
@@ -64,7 +64,7 @@ export default function App() {
   useEffect(() => {
     playerNameRef.current = playerName;
     highScoreRef.current = highScore;
-    localStorage.setItem("snake_player_name", playerName);
+    safeSetItem("snake_player_name", playerName);
   }, [playerName, highScore]);
 
   useEffect(() => {
@@ -75,55 +75,67 @@ export default function App() {
 
     const loop = (currentTime: number) => {
       animationFrameId = requestAnimationFrame(loop);
+
+      if (
+        !gameStateRef.current.isStarted ||
+        gameStateRef.current.isGameOver ||
+        gameStateRef.current.isVictory
+      ) {
+        lastTime = currentTime;
+        accumulator = 0;
+        return;
+      }
+
       let deltaTime = currentTime - lastTime;
       lastTime = currentTime;
       if (deltaTime > 100) deltaTime = 100;
       accumulator += deltaTime;
 
-      const oldScore = engine.score;
-      const oldIsVictory = engine.isVictory;
+      let currentState = gameStateRef.current;
+      const oldScore = currentState.score;
+      const oldIsVictory = currentState.isVictory;
       let hasStepped = false;
 
       while (accumulator >= SNAKE_STEP_TIME) {
-        engine.step();
+        currentState = step(currentState);
         accumulator -= SNAKE_STEP_TIME;
         hasStepped = true;
       }
 
       if (hasStepped) {
-        const newState = engine.getState();
-        setGameState(newState);
+        gameStateRef.current = currentState;
+        setGameState(currentState);
 
-        if (engine.score > oldScore) {
+        if (currentState.score > oldScore) {
           setLogs(prev => {
             const newLogs = [
               {
                 id: Date.now().toString(),
-                text: `🍏 ${playerNameRef.current} съел фрукт! Счет: ${engine.score}`
+                text: `🍏 ${playerNameRef.current} съел фрукт! Счет: ${currentState.score}`
               },
               ...prev
             ].slice(0, 5);
-            localStorage.setItem("snake_game_logs", JSON.stringify(newLogs));
+            safeSetItem("snake_game_logs", JSON.stringify(newLogs));
             return newLogs;
           });
 
-          if (engine.score > highScoreRef.current) {
-            setHighScore(engine.score);
-            localStorage.setItem("snake_high_score", engine.score.toString());
+          if (currentState.score > highScoreRef.current) {
+            setHighScore(currentState.score);
+            safeSetItem("snake_high_score", currentState.score.toString());
           }
         }
 
-        if (engine.isVictory && !oldIsVictory) {
+        if (currentState.isVictory && !oldIsVictory) {
           confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
         }
 
-        localStorage.setItem("snake_saved_state", JSON.stringify(newState));
+        safeSetItem("snake_saved_state", JSON.stringify(currentState));
       }
     };
 
     animationFrameId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [engine]);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -136,50 +148,43 @@ export default function App() {
         return;
 
       e.preventDefault();
+      const current = gameStateRef.current;
 
-      if (engine.isGameOver) {
-        engine.reset();
-        setGameState(engine.getState());
-        localStorage.setItem(
-          "snake_saved_state",
-          JSON.stringify(engine.getState())
-        );
+      if (current.isGameOver) {
+        const resetState = createInitialState(current.width, current.height);
+        gameStateRef.current = resetState;
+        setGameState(resetState);
+        safeSetItem("snake_saved_state", JSON.stringify(resetState));
         return;
       }
 
-      engine.changeDirection(e.key);
-      setGameState(engine.getState());
-      localStorage.setItem(
-        "snake_saved_state",
-        JSON.stringify(engine.getState())
-      );
+      const newState = changeDirection(current, e.key);
+      gameStateRef.current = newState;
+      setGameState(newState);
+      safeSetItem("snake_saved_state", JSON.stringify(newState));
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [engine]);
+  }, []);
 
   const applySettings = useCallback(() => {
-    const w = Math.min(Math.max(inputWidth || 20, 5), 60);
-    const h = Math.min(Math.max(inputHeight || 15, 5), 60);
+    const w = Math.min(Math.max(Math.floor(inputWidth || 20), 5), 60);
+    const h = Math.min(Math.max(Math.floor(inputHeight || 15), 5), 60);
 
     setInputWidth(w);
     setInputHeight(h);
 
-    engine.setSize(w, h);
-
-    engine.reset();
-    setGameState(engine.getState());
-    localStorage.setItem(
-      "snake_saved_state",
-      JSON.stringify(engine.getState())
-    );
-  }, [engine, inputWidth, inputHeight]);
+    const newState = createInitialState(w, h);
+    gameStateRef.current = newState;
+    setGameState(newState);
+    safeSetItem("snake_saved_state", JSON.stringify(newState));
+  }, [inputWidth, inputHeight]);
 
   const removeLog = (id: string) => {
     setLogs(prev => {
       const newLogs = prev.filter(l => l.id !== id);
-      localStorage.setItem("snake_game_logs", JSON.stringify(newLogs));
+      safeSetItem("snake_game_logs", JSON.stringify(newLogs));
       return newLogs;
     });
   };

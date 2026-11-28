@@ -1,141 +1,103 @@
-import { GameState, Point, Direction } from "./types";
+import { GameState } from "./types";
 
-export class SnakeGame {
-  public width: number;
-  public height: number;
-  public cellSize: number = 30;
-  public direction: Direction = { x: 1, y: 0 };
-  public nextDirection: Direction = { x: 1, y: 0 };
-  public isStarted: boolean = false;
-  public isGameOver: boolean = false;
-  public isVictory: boolean = false;
-  public score: number = 0;
-  public snake: Point[] = [];
-  public food: Point = { x: 0, y: 0 };
-
-  constructor(width = 20, height = 15) {
-    this.width = width;
-    this.height = height;
-    this.reset();
-  }
-
-  setSize(w: number, h: number) {
-    this.width = w;
-    this.height = h;
-    this.reset();
-  }
-
-  reset() {
-    this.direction = { x: 1, y: 0 };
-    this.nextDirection = { x: 1, y: 0 };
-    this.isStarted = false;
-    this.isGameOver = false;
-    this.isVictory = false;
-    this.score = 0;
-    const startX = Math.floor(this.width / 2);
-    const startY = Math.floor(this.height / 2);
-    this.snake = [
+export function createInitialState(width: number, height: number): GameState {
+  const startX = Math.floor(width / 2);
+  const startY = Math.floor(height / 2);
+  const state: GameState = {
+    width,
+    height,
+    snake: [
       { x: startX, y: startY },
       { x: startX - 1, y: startY },
       { x: startX - 2, y: startY }
-    ];
-    this.spawnFood();
+    ],
+    food: { x: 0, y: 0 },
+    score: 0,
+    direction: { x: 1, y: 0 },
+    nextDirection: { x: 1, y: 0 },
+    isStarted: false,
+    isGameOver: false,
+    isVictory: false
+  };
+  return spawnFood(state);
+}
+
+export function spawnFood(state: GameState): GameState {
+  if (state.snake.length >= state.width * state.height) {
+    return { ...state, isVictory: true };
+  }
+  let foodX = 0,
+    foodY = 0;
+  while (true) {
+    foodX = Math.floor(Math.random() * state.width);
+    foodY = Math.floor(Math.random() * state.height);
+    const isOnSnake = state.snake.some(c => c.x === foodX && c.y === foodY);
+    if (!isOnSnake) break;
+  }
+  return { ...state, food: { x: foodX, y: foodY } };
+}
+
+export function changeDirection(state: GameState, key: string): GameState {
+  let nextDirection = state.nextDirection;
+  switch (key) {
+    case "ArrowUp":
+      if (state.direction.y === 0) nextDirection = { x: 0, y: -1 };
+      break;
+    case "ArrowDown":
+      if (state.direction.y === 0) nextDirection = { x: 0, y: 1 };
+      break;
+    case "ArrowLeft":
+      if (state.direction.x === 0) nextDirection = { x: -1, y: 0 };
+      break;
+    case "ArrowRight":
+      if (state.direction.x === 0) nextDirection = { x: 1, y: 0 };
+      break;
+  }
+  return { ...state, isStarted: true, nextDirection };
+}
+
+export function step(state: GameState): GameState {
+  if (!state.isStarted || state.isGameOver || state.isVictory) return state;
+
+  const direction = state.nextDirection;
+  let nextHeadX = state.snake[0].x + direction.x;
+  let nextHeadY = state.snake[0].y + direction.y;
+
+  if (nextHeadX >= state.width) nextHeadX = 0;
+  else if (nextHeadX < 0) nextHeadX = state.width - 1;
+  if (nextHeadY >= state.height) nextHeadY = 0;
+  else if (nextHeadY < 0) nextHeadY = state.height - 1;
+
+  const willEat = nextHeadX === state.food.x && nextHeadY === state.food.y;
+  const snakeToCheck = willEat ? state.snake : state.snake.slice(0, -1);
+  const isBitten = snakeToCheck.some(
+    cell => cell.x === nextHeadX && cell.y === nextHeadY
+  );
+
+  if (isBitten) {
+    return { ...state, isGameOver: true };
   }
 
-  spawnFood() {
-    if (this.snake.length >= this.width * this.height) {
-      this.isVictory = true;
-      return;
+  const newHead = { x: nextHeadX, y: nextHeadY };
+  let newSnake = [newHead, ...state.snake];
+
+  if (!willEat) {
+    newSnake = newSnake.slice(0, -1);
+  }
+
+  const newState = { ...state, direction, snake: newSnake };
+
+  if (willEat) {
+    newState.score = state.score + 1;
+    const stateWithFood = spawnFood(newState);
+    if (
+      stateWithFood.snake.length ===
+      stateWithFood.width * stateWithFood.height
+    ) {
+      return { ...stateWithFood, isVictory: true };
     }
-    while (true) {
-      const foodX = Math.floor(Math.random() * this.width);
-      const foodY = Math.floor(Math.random() * this.height);
-      const isOnSnake = this.snake.some(c => c.x === foodX && c.y === foodY);
-      if (!isOnSnake) {
-        this.food = { x: foodX, y: foodY };
-        break;
-      }
-    }
+    return stateWithFood;
   }
 
-  changeDirection(key: string) {
-    switch (key) {
-      case "ArrowUp":
-        if (this.direction.y === 0) this.nextDirection = { x: 0, y: -1 };
-        break;
-      case "ArrowDown":
-        if (this.direction.y === 0) this.nextDirection = { x: 0, y: 1 };
-        break;
-      case "ArrowLeft":
-        if (this.direction.x === 0) this.nextDirection = { x: -1, y: 0 };
-        break;
-      case "ArrowRight":
-        if (this.direction.x === 0) this.nextDirection = { x: 1, y: 0 };
-        break;
-    }
-    this.isStarted = true;
-  }
-
-  step() {
-    if (!this.isStarted || this.isGameOver || this.isVictory) return;
-
-    this.direction = this.nextDirection;
-    let nextHeadX = this.snake[0].x + this.direction.x;
-    let nextHeadY = this.snake[0].y + this.direction.y;
-
-    if (nextHeadX >= this.width) nextHeadX = 0;
-    else if (nextHeadX < 0) nextHeadX = this.width - 1;
-    if (nextHeadY >= this.height) nextHeadY = 0;
-    else if (nextHeadY < 0) nextHeadY = this.height - 1;
-
-    const willEat = nextHeadX === this.food.x && nextHeadY === this.food.y;
-    const snakeToCheck = willEat ? this.snake : this.snake.slice(0, -1);
-    const isBitten = snakeToCheck.some(
-      cell => cell.x === nextHeadX && cell.y === nextHeadY
-    );
-
-    if (isBitten) {
-      this.isGameOver = true;
-      return;
-    }
-
-    const newHead = { x: nextHeadX, y: nextHeadY };
-    this.snake.unshift(newHead);
-
-    if (willEat) {
-      this.score++;
-      this.spawnFood();
-      if (this.snake.length === this.width * this.height) this.isVictory = true;
-    } else {
-      this.snake.pop();
-    }
-  }
-
-  getState(): GameState {
-    return {
-      width: this.width,
-      height: this.height,
-      snake: this.snake,
-      food: this.food,
-      score: this.score,
-      direction: this.direction,
-      nextDirection: this.nextDirection,
-      isStarted: this.isStarted,
-      isGameOver: this.isGameOver,
-      isVictory: this.isVictory
-    };
-  }
-
-  loadState(state: GameState) {
-    this.width = state.width;
-    this.height = state.height;
-    this.snake = state.snake;
-    this.food = state.food;
-    this.score = state.score;
-    this.direction = state.direction;
-    this.nextDirection = state.nextDirection;
-    this.isStarted = state.isStarted;
-    this.isGameOver = state.isGameOver;
-    this.isVictory = state.isVictory;
-  }
+  return newState;
 }

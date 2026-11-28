@@ -25,6 +25,7 @@ export const Controls = ({
       value={playerName}
       onChange={e => onNameChange(e.target.value)}
     />
+
     <input
       type="number"
       id="width_input"
@@ -32,7 +33,9 @@ export const Controls = ({
       onChange={e => onWidthChange(Number(e.target.value))}
       min="5"
       max="60"
+      step="1"
     />
+
     <input
       type="number"
       id="height_input"
@@ -40,7 +43,9 @@ export const Controls = ({
       onChange={e => onHeightChange(Number(e.target.value))}
       min="5"
       max="60"
+      step="1"
     />
+
     <button id="apply-btn" onClick={onApply}>
       Обновить карту
     </button>
